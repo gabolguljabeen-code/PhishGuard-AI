@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { classify, type Analysis, type RiskClass } from "@/lib/analyzer";
+import { getSession } from "@/lib/auth";
 import { ensureScanSchema, turso } from "@/lib/turso";
 
 export const runtime = "nodejs";
@@ -14,10 +15,13 @@ const MAX_HISTORY = 30;
 type ScanType = "Email" | "URL" | "HTML";
 
 async function getWorkspace() {
+  const session = await getSession();
+  if (!session) return null;
   const store = await cookies();
   const existing = store.get(COOKIE_NAME)?.value;
-  const valid = existing && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(existing);
-  return { id: valid ? existing : randomUUID(), isNew: !valid };
+  const isValid = typeof existing === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(existing);
+  const browserId = isValid ? existing : randomUUID();
+  return { id: `${session.id}:${browserId}`, browserId, isNew: !isValid };
 }
 
 function withWorkspaceCookie(response: NextResponse, id: string, isNew: boolean) {
@@ -58,6 +62,7 @@ function displaySummary(type: ScanType) {
 export async function GET() {
   if (!turso) return unavailable();
   const workspace = await getWorkspace();
+  if (!workspace) return NextResponse.json({ error: "Sign in to view scan history." }, { status: 401 });
   try {
     await ensureScanSchema();
     await turso.execute({ sql: "DELETE FROM scans WHERE created_at < ?", args: [new Date(Date.now() - COOKIE_AGE_SECONDS * 1000).toISOString()] });
@@ -70,7 +75,7 @@ export async function GET() {
       const score = Number(row.score);
       return { id: String(row.id), type, summary: displaySummary(type), score, classification: String(row.classification) as RiskClass, time: String(row.created_at), analysis: storedAnalysis(score) };
     });
-    return withWorkspaceCookie(NextResponse.json({ scans }), workspace.id, workspace.isNew);
+    return withWorkspaceCookie(NextResponse.json({ scans }), workspace.browserId, workspace.isNew);
   } catch {
     return NextResponse.json({ error: "Could not load scan history from Turso." }, { status: 500 });
   }
@@ -82,6 +87,7 @@ export async function POST(request: NextRequest) {
   const contentLength = Number(request.headers.get("content-length") || 0);
   if (contentLength > 1_000) return NextResponse.json({ error: "Scan record is too large." }, { status: 413 });
   const workspace = await getWorkspace();
+  if (!workspace) return NextResponse.json({ error: "Sign in to save scan history." }, { status: 401 });
   try {
     const rawBody = await request.text();
     if (rawBody.length > 1_000) return NextResponse.json({ error: "Scan record is too large." }, { status: 413 });
@@ -102,7 +108,7 @@ export async function POST(request: NextRequest) {
       args: [workspace.id, workspace.id, MAX_HISTORY],
     });
     const scan = { id: body.id, type: body.type, summary: displaySummary(body.type as ScanType), score, classification, time: createdAt, analysis: storedAnalysis(score) };
-    return withWorkspaceCookie(NextResponse.json({ scan }, { status: 201 }), workspace.id, workspace.isNew);
+    return withWorkspaceCookie(NextResponse.json({ scan }, { status: 201 }), workspace.browserId, workspace.isNew);
   } catch {
     return NextResponse.json({ error: "Could not save scan history to Turso." }, { status: 500 });
   }
@@ -112,10 +118,11 @@ export async function DELETE(request: NextRequest) {
   if (!turso) return unavailable();
   if (!validOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const workspace = await getWorkspace();
+  if (!workspace) return NextResponse.json({ error: "Sign in to clear scan history." }, { status: 401 });
   try {
     await ensureScanSchema();
     await turso.execute({ sql: "DELETE FROM scans WHERE workspace_id = ?", args: [workspace.id] });
-    return withWorkspaceCookie(NextResponse.json({ ok: true }), workspace.id, workspace.isNew);
+    return withWorkspaceCookie(NextResponse.json({ ok: true }), workspace.browserId, workspace.isNew);
   } catch {
     return NextResponse.json({ error: "Could not clear scan history from Turso." }, { status: 500 });
   }

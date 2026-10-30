@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, CircleHelp, Clock3, FileCode2, FileSearch, Globe2, GraduationCap, History, LayoutDashboard, Link2, Mail, Menu, PanelLeftClose, Play, Radar, Shield, ShieldAlert, ShieldCheck, Trash2, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, CircleHelp, Clock3, FileCode2, FileSearch, Globe2, GraduationCap, History, LayoutDashboard, Link2, LogOut, Mail, Menu, PanelLeftClose, Play, Radar, Shield, ShieldAlert, ShieldCheck, Trash2, X } from "lucide-react";
 import { analyzeEmail, analyzeHtml, analyzeUrl, type Analysis, type RiskClass } from "@/lib/analyzer";
 
 type Section = "Overview" | "Email scanner" | "URL scanner" | "HTML awareness" | "Learn" | "Scan history";
 type Scan = { id: string; type: string; summary: string; score: number; classification: RiskClass; time: string; analysis: Analysis };
+type AuthUser = { id: string; name: string; email: string };
 const sections: { name: Section; icon: typeof LayoutDashboard }[] = [
   { name: "Overview", icon: LayoutDashboard }, { name: "Email scanner", icon: Mail }, { name: "URL scanner", icon: Globe2 }, { name: "HTML awareness", icon: FileCode2 }, { name: "Learn", icon: BookOpen }, { name: "Scan history", icon: History },
 ];
@@ -30,15 +31,26 @@ export default function Home() {
   const [url, setUrl] = useState(""); const [html, setHtml] = useState("");
   const [current, setCurrent] = useState<{ type: string; summary: string; analysis: Analysis; extra?: ReturnType<typeof analyzeUrl>; matchedUrls?: string[] } | null>(null);
   const [history, setHistory] = useState<Scan[]>([]); const [mobileNav, setMobileNav] = useState(false); const [toast, setToast] = useState(""); const [databaseStatus, setDatabaseStatus] = useState<"connecting" | "connected" | "unavailable">("connecting");
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null); const [authStatus, setAuthStatus] = useState<"checking" | "signed-in" | "signed-out">("checking");
   useEffect(() => {
     let active = true;
-    fetch("/api/scans").then(async (response) => {
+    fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) throw new Error("Session unavailable");
+      const data = await response.json() as { user: AuthUser | null };
+      if (active) { setAuthUser(data.user); setAuthStatus(data.user ? "signed-in" : "signed-out"); }
+    }).catch(() => { if (active) setAuthStatus("signed-out"); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    if (authStatus !== "signed-in") return;
+    let active = true;
+    fetch("/api/scans", { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("Turso unavailable");
       const data = await response.json() as { scans: Scan[] };
       if (active) { setHistory(data.scans); setDatabaseStatus("connected"); }
     }).catch(() => { if (active) setDatabaseStatus("unavailable"); });
     return () => { active = false; };
-  }, []);
+  }, [authStatus]);
   const counts = useMemo(() => ({ phishing: history.filter(x => x.type === "Email" && x.score >= 30).length, websites: history.filter(x => x.type === "URL" && x.score >= 30).length, safe: history.filter(x => x.score < 30).length }), [history]);
   function record(type: string, summary: string, analysis: Analysis, extra?: ReturnType<typeof analyzeUrl>, matchedUrls?: string[]) {
     setCurrent({ type, summary, analysis, extra, matchedUrls });
@@ -54,6 +66,10 @@ export default function Home() {
   function runHtml(value = html) { if (!value.trim()) { setToast("Paste an HTML snippet to analyze."); return; } const analysis = analyzeHtml(value); setHtml(value); record("HTML", "HTML snippet analysis", analysis); }
   function useDemo(demo: typeof demos[number]) { if (demo.kind === "email") { setSection("Email scanner"); setEmail(demo.value); runEmail(demo.value); } else { setSection("URL scanner"); setUrl(demo.value); runUrl(demo.value); } }
   function showToast(text: string) { setToast(text); window.setTimeout(() => setToast(""), 2800); }
+  function signOut() { fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined).finally(() => { setAuthUser(null); setAuthStatus("signed-out"); setHistory([]); setCurrent(null); }); }
+
+  if (authStatus === "checking") return <div className="auth-loading"><span className="live-dot"/> Loading PhishGuard AI…</div>;
+  if (authStatus === "signed-out") return <LoginScreen onAuthenticated={(user) => { setAuthUser(user); setAuthStatus("signed-in"); setHistory([]); setDatabaseStatus("connecting"); }} />;
 
   return <main className="app-shell">
     <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
@@ -64,7 +80,7 @@ export default function Home() {
     </aside>
     {mobileNav && <button className="scrim" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
     <div className="main-area">
-      <header className="topbar"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(true)}><Menu size={20}/></button><div className="breadcrumbs"><span>Workspace</span><span className="crumb-divider">/</span><strong>{section}</strong></div><div className="top-actions"><span className="engine-status"><i/>{databaseStatus === "connected" ? "Turso connected" : databaseStatus === "connecting" ? "Connecting to Turso" : "Turso not connected"}</span><button className="help-button" title="About this tool" onClick={() => setSection("Learn")}><CircleHelp size={16}/></button><div className="avatar">PG</div></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(true)}><Menu size={20}/></button><div className="breadcrumbs"><span>Workspace</span><span className="crumb-divider">/</span><strong>{section}</strong></div><div className="top-actions"><span className="engine-status"><i/>{databaseStatus === "connected" ? "Turso connected" : databaseStatus === "connecting" ? "Connecting to Turso" : "Turso not connected"}</span><button className="help-button" title="About this tool" onClick={() => setSection("Learn")}><CircleHelp size={16}/></button><span className="signed-in-name">{authUser?.name}</span><button className="help-button" aria-label="Sign out" title="Sign out" onClick={signOut}><LogOut size={16}/></button></div></header>
       <section className="content">
         {section === "Overview" && <>
           <div className="page-heading"><div><div className="eyebrow"><span className="live-dot"/> PERSONAL SECURITY CENTER</div><h1>Good day. Stay one step ahead.</h1><p>Inspect suspicious messages and links before you trust them.</p></div><button className="button secondary" onClick={() => setSection("Learn")}><BookOpen size={16}/> Security guide <ArrowRight size={15}/></button></div>
@@ -97,6 +113,21 @@ function QuickCard({icon:Icon,title,desc,onClick}:{icon:typeof Activity;title:st
 function PanelTitle({title,desc,action}:{title:string;desc:string;action?:React.ReactNode}) { return <div className="panel-heading"><div><h2>{title}</h2><p>{desc}</p></div>{action}</div>; }
 function Empty({icon:Icon,title,desc,button,onClick}:{icon:typeof Activity;title:string;desc:string;button:string;onClick:()=>void}) { return <div className="empty"><div className="empty-icon"><Icon size={20}/></div><strong>{title}</strong><p>{desc}</p><button className="text-button" onClick={onClick}>{button} <ArrowRight size={14}/></button></div>; }
 function ActivityList({rows,onSelect,detailed=false}:{rows:Scan[];onSelect:(row:Scan)=>void;detailed?:boolean}) { return <div className={`activity-list ${detailed?"detailed":""}`}>{rows.map(row=><button className="activity-row" key={row.id} onClick={()=>onSelect(row)}><span className={`activity-kind ${row.type.toLowerCase()}`}>{row.type==="Email"?<Mail size={15}/>:row.type==="URL"?<Globe2 size={15}/>:<FileCode2 size={15}/>}</span><span className="activity-text"><strong>{row.summary}</strong><small>{row.type} analysis <i/> {new Date(row.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</small></span><span className="activity-score">{row.score}<small>/100</small></span><Badge score={row.score} classification={row.classification}/><ChevronDown className="row-chevron" size={15}/></button>)}</div>; }
+function LoginScreen({onAuthenticated}:{onAuthenticated:(user:AuthUser)=>void}) {
+  const [email,setEmail]=useState(""); const [password,setPassword]=useState(""); const [error,setError]=useState(""); const [busy,setBusy]=useState(false);
+  const accounts=[{name:"Demo Analyst",email:"analyst@demo.phishguard.ai",password:"AnalystDemo2026!"},{name:"Demo Student",email:"student@demo.phishguard.ai",password:"StudentDemo2026!"}];
+  async function submit(event:React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      const response=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
+      const data=await response.json() as {user?:AuthUser;error?:string};
+      if(!response.ok||!data.user) throw new Error(data.error||"Sign-in failed.");
+      onAuthenticated(data.user);
+    } catch (cause) { setError(cause instanceof Error?cause.message:"Unable to sign in."); }
+    finally { setBusy(false); }
+  }
+  return <main className="auth-screen"><section className="auth-card"><div className="auth-brand"><span className="brand-mark"><Shield size={20}/></span><div><strong>PhishGuard<span> AI</span></strong><small>SECURITY WORKSPACE</small></div></div><div className="eyebrow">DEMO ACCESS</div><h1>Welcome back.</h1><p className="auth-intro">Sign in with a classroom demo account to open the security workspace.</p><div className="demo-account-list"><span className="auth-label">AVAILABLE DEMO ACCOUNTS</span>{accounts.map(account=><button className="demo-account" type="button" key={account.email} onClick={()=>{setEmail(account.email);setPassword(account.password);setError("");}}><span><strong>{account.name}</strong><small>{account.email}</small></span><span className="demo-use">Use account <ArrowRight size={13}/></span></button>)}</div><form className="auth-form" onSubmit={submit}><label>Email<input type="email" autoComplete="username" value={email} onChange={event=>setEmail(event.target.value)} required placeholder="name@example.com"/></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)} required placeholder="Enter demo password"/></label>{error&&<div className="auth-error" role="alert">{error}</div>}<button className="button primary auth-submit" type="submit" disabled={busy}>{busy?"Signing in…":"Sign in"}<ArrowRight size={15}/></button></form><div className="auth-demo-notice"><ShieldCheck size={15}/><span>These are shared public demo credentials. Anyone can sign in; use synthetic data only. Saved history contains only scan type, score, classification, and time.</span></div></section><footer className="auth-footer">PHISHGUARD AI · EDUCATIONAL SECURITY TOOL</footer></main>;
+}
 function Field({label,value,onChange,placeholder}:{label:string;value:string;onChange:(s:string)=>void;placeholder:string}) { return <label className="field-label">{label}<input className="text-input" value={value} onChange={e=>onChange(e.target.value)} maxLength={320} placeholder={placeholder}/></label>; }
 function ScannerPage({eyebrow,title,description,icon:Icon,children}:{eyebrow:string;title:string;description:string;icon:typeof Activity;children:React.ReactNode}) { return <><div className="page-heading scanner-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div className="scanner-heading-icon"><Icon size={22}/></div></div><div className="scanner-layout"><div className="panel scanner-panel"><div className="scanner-panel-head"><div><h2>New analysis</h2><p>Rule based · score contributors are shown after analysis</p></div><span className="outline-tag"><span className="live-dot"/> LOCAL</span></div>{children}</div><aside className="panel methodology"><div className="method-icon"><ShieldCheck size={17}/></div><h3>How this scan works</h3><p>Analysis runs in this browser. Turso receives only scan type, score, and timestamp for history.</p><div className="thresholds"><div><i className="safe-dot"/><span>Low risk</span><b>0–29</b></div><div><i className="warning-dot"/><span>Suspicious</span><b>30–59</b></div><div><i className="danger-dot"/><span>High risk</span><b>60–100</b></div></div><div className="method-warning"><AlertTriangle size={15}/><span>A low score is not proof of safety. Rules can miss threats and produce false alarms.</span></div></aside></div></>; }
 function ResultModal({current,onClose}:{current:{type:string;summary:string;analysis:Analysis;extra?:ReturnType<typeof analyzeUrl>;matchedUrls?:string[]};onClose:()=>void}) { const {analysis}=current; return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><section className="result-modal" role="dialog" aria-modal="true" aria-labelledby="result-title"><div className="result-head"><div><div className="eyebrow">{current.type.toUpperCase()} ANALYSIS</div><h2 id="result-title">Analysis result</h2><p>{current.summary}</p></div><button className="icon-button" onClick={onClose} aria-label="Close result"><X size={18}/></button></div><div className={`result-score ${scoreTone(analysis.score)}`}><div><span>Risk score</span><strong>{analysis.score}<small>/100</small></strong></div><Badge score={analysis.score} classification={analysis.classification}/><div className="full-meter"><RiskMeter score={analysis.score}/></div></div>{current.matchedUrls && current.matchedUrls.length > 0 && <div className="result-section extracted-links"><h3>Links found in message <span>{current.matchedUrls.length}</span></h3><p>Shown as text only. PhishGuard did not open these links.</p><div>{current.matchedUrls.map((link,i)=><code key={`${link}-${i}`}>{link}</code>)}</div></div>}{current.extra?.domain&&<div className="url-facts"><div className="domain-result"><span>DOMAIN</span><strong>{current.extra.domain}</strong></div>{current.extra.facts.map(f=><span key={f}>{f}</span>)}</div>}{current.extra?.urlError&&<div className="error-inline"><AlertTriangle size={15}/>{current.extra.urlError}</div>}<div className="result-section"><h3>Indicators <span>{analysis.indicators.length}</span></h3>{analysis.indicators.length===0?<p className="no-indicators"><Check size={15}/> No suspicious indicators were found.</p>:<div className="indicator-list">{analysis.indicators.map((item,i)=><div className="indicator" key={`${item.title}-${i}`}><span className={`indicator-icon ${item.points===0?"neutral":item.points>=20?"danger":"warning"}`}><AlertTriangle size={14}/></span><div><strong>{item.title}</strong><p>{item.detail}</p></div><span className="points">+{item.points}</span></div>)}</div>}</div><div className="result-section recs"><h3>Recommended next steps</h3>{analysis.recommendations.map((item,i)=><div key={i}><span>{String(i+1).padStart(2,"0")}</span>{item}</div>)}</div><div className="modal-disclaimer"><ShieldCheck size={15}/> Local heuristic only · no blacklist or reputation service was queried.</div><button className="button primary modal-done" onClick={onClose}>Done <Check size={15}/></button></section></div>; }

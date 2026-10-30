@@ -7,11 +7,13 @@
 ## Features
 
 - Dashboard with saved scan counts and history scoped to a random browser workspace cookie.
+- Sign-in screen with two shared classroom demo accounts and server-signed, eight-hour HttpOnly sessions.
 - Email inspection for urgency, account verification, credentials/OTPs, links, attachment language, unusual sender addresses, and display-name mismatches when sender fields are supplied.
 - Static URL parsing for HTTP, length, IP hosts, Unicode/punycode, subdomains, shorteners, selected unusual TLDs, embedded user information, encoded delimiters, and common brand lookalikes.
 - HTML snippet awareness checks for password forms, mismatched form hosts when an optional `<!-- page-host: example.org -->` comment is supplied, recognizable brand cues, and external scripts. Snippets are never inserted into the DOM or executed.
 - Weighted indicators with an explanation, contribution points, a 0–100 total, and next steps.
 - Optional Turso-backed history retains only scan type, score, classification, and timestamp. Email text, HTML, URL strings, hostnames, sender data, extracted links, and rule explanations are not sent to the server. History is scoped to a random HttpOnly browser cookie, capped at 30 scans, and expires after 30 days. Clearing history deletes the rows for that browser workspace.
+- Demo sign-in credentials are intentionally public and shared. They demonstrate the flow; they do not provide private user identity or access control. Use synthetic content only.
 - Security learning cards, quiz, and educational one-click examples.
 - Responsive dark interface and keyboard focus states.
 
@@ -20,6 +22,7 @@
 - Node.js 20.9 or newer
 - npm
 - A Turso database and its URL and auth token for persistent history
+- `AUTH_SECRET` for signed sessions in production
 
 ```bash
 npm install
@@ -36,6 +39,17 @@ turso db tokens create phishguard-ai
 ```
 
 On the first request, the app creates the `scans` table and index defined in `db/schema.sql`. Without Turso credentials, analysis still works locally, but persistent history is unavailable. Open [http://localhost:3000](http://localhost:3000). The App Router entry point is `app/page.tsx`; the scoring logic is `lib/analyzer.ts`.
+
+### Demo sign-in accounts
+
+Select either account on the sign-in page to fill its credentials:
+
+| Account | Email | Password |
+| --- | --- | --- |
+| Demo Analyst | `analyst@demo.phishguard.ai` | `AnalystDemo2026!` |
+| Demo Student | `student@demo.phishguard.ai` | `StudentDemo2026!` |
+
+These shared credentials are in the public source by design. They are for classroom demonstrations only. In production, set `AUTH_SECRET` to a private random value (for example, `openssl rand -base64 32`); the app refuses to sign in without it. The session cookie is HttpOnly, Secure in production, SameSite=Lax, and expires after eight hours. Scan history remains separated by demo account and browser workspace.
 
 ## Detection algorithm
 
@@ -88,7 +102,7 @@ Do not commit `.env` files or credentials. Turso URL and token are required for 
 
 1. Import the GitHub repository in Vercel.
 2. Keep the detected framework as **Next.js** and the project root as the repository root.
-3. In Vercel Project Settings → Environment Variables, add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Keep the token private and never add `.env.local` to GitHub.
+3. In Vercel Project Settings → Environment Variables, add `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and a generated private `AUTH_SECRET`. Keep these values private and never add `.env.local` to GitHub.
 4. Deploy. Vercel runs the Next.js build. Later pushes to the connected branch create deployments.
 
 You can also deploy from the CLI with `npx vercel` and `npx vercel --prod`.
