@@ -32,7 +32,9 @@ export function analyzeEmail(input: { message: string; sender?: string; displayN
   const links = message.match(/(?:https?:\/\/|www\.)[^\s<>"']+/gi) ?? [];
   if (links.length) add(indicators, "Link present", `${links.length} URL${links.length === 1 ? "" : "s"} found; inspect the domain before opening.`, 8 + Math.min(12, (links.length - 1) * 4));
   if (/(attached|attachment|open the file|enable macros|document attached|invoice\.pdf)/i.test(message)) add(indicators, "Attachment mentioned", "Unexpected files can carry malware or lead to credential theft.", 14);
-  if (sender && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender.trim())) add(indicators, "Unusual sender address", "The supplied sender does not look like a normal email address.", 16);
+  if (sender && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender.trim())) add(indicators, "Unusual sender address", "The supplied sender does not look like a normal email address.", 24);
+  if (sender && /^[a-z]{5,}\d{3,}@/i.test(sender.trim())) add(indicators, "Unusual sender identifier", "This address has a random-looking name followed by several digits. That can occur in legitimate accounts, but it is a reason to verify the sender through another channel.", 22);
+  if (sender) add(indicators, "Sender domain not verified", "This local scan did not check whether the domain exists, accepts email, or belongs to the claimed sender. A valid-looking address alone does not prove the sender is genuine.", 0);
   if (sender && /@(gmail|yahoo|outlook|hotmail)\./i.test(sender) && /(bank|university|microsoft|apple|paypal|amazon|support|helpdesk|security|administrator|\bIT\b|billing)/i.test(displayName)) add(indicators, "Sender and display name mismatch", "A public mailbox is paired with an organization or support name. Sender names can be spoofed.", 30);
   if (displayName && sender && !/@(gmail|yahoo|outlook|hotmail)\./i.test(sender)) {
     const senderHost = sender.split("@")[1]?.toLowerCase() ?? "";
@@ -40,11 +42,14 @@ export function analyzeEmail(input: { message: string; sender?: string; displayN
     const host = senderHost.replace(/[^a-z0-9]/g, "");
     if (name.length > 3 && !host.includes(name.slice(0, Math.min(6, name.length)))) add(indicators, "Display name does not match sender domain", "The supplied display name is not clearly reflected in the sender domain. Verify through a known channel.", 20);
   }
-  return result(indicators, indicators.length ? ["Do not reply, open attachments, or use links in this message.", "Contact the organization using a phone number or website you already trust.", "Report the message to your mail provider or security team."] : ["No strong phishing patterns were found by these local rules.", "Confirm the sender and context independently before sharing sensitive information."]);
+  return result(indicators, indicators.some((item) => item.title === "Unusual sender identifier" || item.title === "Sender domain not verified") ? ["Verify an unfamiliar sender using a separate trusted channel before relying on the message.", "This local scan does not check domain registration, mail records, or sender reputation.", ...(indicators.some((item) => item.points > 0) ? ["Do not reply, open attachments, or use links until you are confident the message is legitimate."] : [])] : indicators.length ? ["Do not reply, open attachments, or use links in this message.", "Contact the organization using a phone number or website you already trust.", "Report the message to your mail provider or security team."] : ["No strong phishing patterns were found by these local rules.", "Confirm the sender and context independently before sharing sensitive information."]);
 }
 
 const shorteners = new Set(["bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "buff.ly", "cutt.ly"]);
 const brands = ["google", "microsoft", "apple", "paypal", "amazon", "facebook", "instagram", "netflix", "bankofamerica"];
+const brandLookalikes: Record<string, { brand: string; explanation: string }> = {
+  netmirror: { brand: "Netflix", explanation: "The registered domain label “netmirror” resembles the name used by Netflix mirror sites. The scan did not visit the site or verify who operates it." },
+};
 const unusualTlds = new Set(["zip", "mov", "click", "top", "xyz", "work", "country", "gq", "tk"]);
 
 function editDistance(a: string, b: string): number {
@@ -79,9 +84,14 @@ export function analyzeUrl(raw: string): Analysis & { normalized?: string; domai
   if (unusualTlds.has(tld)) add(indicators, "Unusual top-level domain", `“.${tld}” is sometimes used in low-cost or disposable domains; this is not proof of abuse.`, 10);
   if (url.username || url.password) add(indicators, "Embedded user information", "Credentials embedded before the host can disguise the actual destination.", 26);
   if (/%(?:2f|5c|40|2e)/i.test(raw) || /\\\\|%[0-9a-f]{2}/i.test(raw)) add(indicators, "Encoded or escaped URL characters", "Encoded delimiters or escaped characters can make a URL harder to read.", 12);
-  if (hostname.includes("-") && brands.some((brand) => hostname.includes(brand) && hostname.split(".")[0] !== brand)) add(indicators, "Brand name embedded in another domain", "A brand word appears in a different registered domain; the exact hostname matters.", 20);
   if (labels.slice(0, -2).some((label) => brands.some((brand) => label === brand || label.startsWith(`${brand}-`)))) add(indicators, "Brand appears only in a subdomain", "A familiar brand appears before the registered-domain label; inspect the actual hostname owner.", 20);
   const registrableGuess = labels.length >= 2 ? labels[labels.length - 2] : hostname;
+  const lookalike = brandLookalikes[registrableGuess];
+  if (lookalike) add(indicators, `Possible ${lookalike.brand} brand impersonation`, lookalike.explanation, 35);
+  for (const brand of brands) if (registrableGuess !== brand && registrableGuess.includes(brand) && !lookalike) {
+    add(indicators, "Brand name embedded in another domain", `The registered domain label “${registrableGuess}” contains the name ${brand}, but it is not that brand’s exact domain. This is a warning sign, not proof of impersonation.`, 30);
+    break;
+  }
   for (const brand of brands) if (registrableGuess !== brand && registrableGuess.length >= 4 && editDistance(registrableGuess, brand) === 1) { add(indicators, "Possible misspelled brand domain", `The domain label “${registrableGuess}” resembles ${brand}.`, 30); break; }
   if (/[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/.test(raw)) add(indicators, "Invisible or directional characters", "Hidden Unicode formatting characters can disguise text.", 24);
   return { ...result(indicators, indicators.length ? ["Do not sign in or provide information on this site.", "Compare the registered domain with the organization’s official domain using a trusted source.", "A padlock or HTTPS does not mean the site is legitimate."] : ["No strong URL warning signs were found by these local rules.", "Heuristic analysis is not a reputation or malware scan; verify the domain independently."]), normalized: url.href, domain: hostname, facts };
