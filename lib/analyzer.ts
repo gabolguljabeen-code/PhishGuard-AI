@@ -94,7 +94,7 @@ export function analyzeHtml(html: string): Analysis {
   if (/<form\b[^>]*>/i.test(html) && /(password|type\s*=\s*["']?password|autocomplete\s*=\s*["']?current-password)/i.test(html)) add(indicators, "Credential collection form", "The snippet includes a form and password field. This does not establish who operates it.", 25);
   const action = html.match(/<form\b[^>]*action\s*=\s*["']([^"']+)["']/i)?.[1];
   const formHost = action && /^https?:\/\//i.test(action) ? (() => { try { return new URL(action).hostname; } catch { return ""; } })() : "";
-  const title = html.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]?.replace(/<[^>]+>/g, "").trim().toLowerCase() ?? "";
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, "").trim().toLowerCase() ?? "";
   const pageHost = html.match(/<!--\s*page-host:\s*([^\s]+)\s*-->/i)?.[1]?.toLowerCase();
   if (formHost && pageHost && formHost !== pageHost && !formHost.endsWith(`.${pageHost}`)) add(indicators, "Form posts to a different host", "The form destination differs from the optional page-host hint. Confirm the intended destination before trusting the page.", 30);
   if (/<script\b[^>]*\bsrc\s*=/i.test(html)) add(indicators, "External script included", "External scripts can change page behavior; inspect source and ownership carefully.", 12);
