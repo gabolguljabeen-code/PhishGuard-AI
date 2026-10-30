@@ -1,17 +1,17 @@
 # PhishGuard AI
 
-**Intelligent Phishing Email & Fake Website Detection System** is a BSCS Information Security educational project. It provides transparent, rule-based analysis of email text, URLs, and pasted HTML snippets. The initial version runs its analysis in the browser and needs no database, paid API, or custom backend.
+**Intelligent Phishing Email & Fake Website Detection System** is a BSCS Information Security educational project. It provides transparent, rule-based analysis of email text, URLs, and pasted HTML snippets. Analysis runs in the browser; Turso stores only anonymous scan type, score, classification, and timestamp for history.
 
 > **Educational tool, not a security verdict.** A low score does not prove content is safe. Rules can miss threats and can flag legitimate content. Verify requests with the organization through a known channel.
 
 ## Features
 
-- Session dashboard with actual counts from analyses performed in the current browser tab. It starts at zero; no demo statistics are fabricated.
+- Dashboard with saved scan counts and history scoped to a random browser workspace cookie.
 - Email inspection for urgency, account verification, credentials/OTPs, links, attachment language, unusual sender addresses, and display-name mismatches when sender fields are supplied.
 - Static URL parsing for HTTP, length, IP hosts, Unicode/punycode, subdomains, shorteners, selected unusual TLDs, embedded user information, encoded delimiters, and common brand lookalikes.
 - HTML snippet awareness checks for password forms, mismatched form hosts when an optional `<!-- page-host: example.org -->` comment is supplied, recognizable brand cues, and external scripts. Snippets are never inserted into the DOM or executed.
 - Weighted indicators with an explanation, contribution points, a 0–100 total, and next steps.
-- In-memory session history retains only scan type, a generic email/HTML summary (or the URL hostname), score, result and time. It does not keep message body text or the extracted links shown temporarily in the current result. Nothing is written to local storage or sent to an API. Refreshing or closing the tab clears it.
+- Optional Turso-backed history retains only scan type, score, classification, and timestamp. Email text, HTML, URL strings, hostnames, sender data, extracted links, and rule explanations are not sent to the server. History is scoped to a random HttpOnly browser cookie, capped at 30 scans, and expires after 30 days. Clearing history deletes the rows for that browser workspace.
 - Security learning cards, quiz, and educational one-click examples.
 - Responsive dark interface and keyboard focus states.
 
@@ -19,13 +19,23 @@
 
 - Node.js 20.9 or newer
 - npm
+- A Turso database and its URL and auth token for persistent history
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). No environment variables are required. The App Router entry point is `app/page.tsx`; the scoring logic is `lib/analyzer.ts`.
+Copy `.env.example` to `.env.local` and fill in `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Create a Turso database and token with the Turso CLI:
+
+```bash
+turso auth login
+turso db create phishguard-ai
+turso db show phishguard-ai --url
+turso db tokens create phishguard-ai
+```
+
+On the first request, the app creates the `scans` table and index defined in `db/schema.sql`. Without Turso credentials, analysis still works locally, but persistent history is unavailable. Open [http://localhost:3000](http://localhost:3000). The App Router entry point is `app/page.tsx`; the scoring logic is `lib/analyzer.ts`.
 
 ## Detection algorithm
 
@@ -72,24 +82,24 @@ git remote add origin https://github.com/YOUR-USERNAME/YOUR-REPOSITORY.git
 git push -u origin main
 ```
 
-Do not commit `.env` files or credentials. This application has no required secrets.
+Do not commit `.env` files or credentials. Turso URL and token are required for persistent history.
 
 ## Deploy on Vercel
 
 1. Import the GitHub repository in Vercel.
 2. Keep the detected framework as **Next.js** and the project root as the repository root.
-3. Leave environment variables empty; none are required.
+3. In Vercel Project Settings → Environment Variables, add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Keep the token private and never add `.env.local` to GitHub.
 4. Deploy. Vercel runs the Next.js build. Later pushes to the connected branch create deployments.
 
-You can also deploy from the CLI with `npx vercel` and `npx vercel --prod`. There is no custom server or database to provision.
+You can also deploy from the CLI with `npx vercel` and `npx vercel --prod`.
 
 ## University presentation outline
 
 1. **Problem:** users face impersonation, urgency, fake login pages, and lookalike domains.
 2. **Threat model:** the app analyzes user-provided text and addresses; it does not interact with suspected sites or require real credentials.
-3. **Architecture:** Next.js App Router + TypeScript; browser-side rules; session-only React state; Vercel-compatible deployment; no mandatory API or database.
+3. **Architecture:** Next.js App Router + TypeScript; browser-side rules; optional Turso history API; Vercel-compatible deployment.
 4. **Method:** show the weights, score thresholds, and indicator explanations. Compare the fake university email with the legitimate notice.
-5. **Safety design:** no URL fetching (reduces SSRF exposure), no HTML execution (reduces XSS exposure), no passwords/OTPs requested, and no message content sent to a server.
+5. **Safety design:** no URL fetching (reduces SSRF exposure), no HTML execution (reduces XSS exposure), no passwords/OTPs requested, and only scan type, score, classification, and time sent to the database.
 6. **Evaluation:** run the bundled unit tests and demonstrate both false-positive and false-negative limitations.
 7. **Future work:** optionally add a trusted URL reputation provider via a serverless route. Keep the key server-side, validate inputs, apply strict domain and rate limits, and clearly show when a lookup actually occurred. Never silently imply a reputation check.
 
