@@ -79,3 +79,4 @@ body{background:radial-gradient(ellipse at 70% -12%,#1a3032 0,transparent 38%),v
 @media(max-width:760px){.content{padding:27px 18px 18px}.topbar{height:56px}.page-heading h1{font-size:24px}.scanner-layout{grid-template-columns:1fr}.scanner-panel{padding:19px}.methodology{order:2}}
 @media(max-width:520px){.content{padding:22px 13px 14px}.page-heading h1{font-size:21px}.scanner-panel{padding:16px}.scanner-footer{gap:10px}.input-meta{font-size:9px}.result-modal{padding:17px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
+.engine-status{display:none}
