@@ -33,7 +33,7 @@ export function analyzeEmail(input: { message: string; sender?: string; displayN
   if (links.length) add(indicators, "Link present", `${links.length} URL${links.length === 1 ? "" : "s"} found; inspect the domain before opening.`, 8 + Math.min(12, (links.length - 1) * 4));
   if (/(attached|attachment|open the file|enable macros|document attached|invoice\.pdf)/i.test(message)) add(indicators, "Attachment mentioned", "Unexpected files can carry malware or lead to credential theft.", 14);
   if (sender && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender.trim())) add(indicators, "Unusual sender address", "The supplied sender does not look like a normal email address.", 24);
-  if (sender && /^[a-z]{5,}\d{3,}@/i.test(sender.trim())) add(indicators, "Unusual sender identifier", "This address has a random-looking name followed by several digits. That can occur in legitimate accounts, but it is a reason to verify the sender through another channel.", 22);
+  if (sender && /^[a-z]{5,}\d{3,}@/i.test(sender.trim())) add(indicators, "Unusual sender identifier", "This address has a random-looking name followed by several digits. That can occur in legitimate accounts, but it is a reason to verify the sender through another channel.", 30);
   if (sender) add(indicators, "Sender domain not verified", "This local scan did not check whether the domain exists, accepts email, or belongs to the claimed sender. A valid-looking address alone does not prove the sender is genuine.", 0);
   if (sender && /@(gmail|yahoo|outlook|hotmail)\./i.test(sender) && /(bank|university|microsoft|apple|paypal|amazon|support|helpdesk|security|administrator|\bIT\b|billing)/i.test(displayName)) add(indicators, "Sender and display name mismatch", "A public mailbox is paired with an organization or support name. Sender names can be spoofed.", 30);
   if (displayName && sender && !/@(gmail|yahoo|outlook|hotmail)\./i.test(sender)) {
@@ -43,6 +43,37 @@ export function analyzeEmail(input: { message: string; sender?: string; displayN
     if (name.length > 3 && !host.includes(name.slice(0, Math.min(6, name.length)))) add(indicators, "Display name does not match sender domain", "The supplied display name is not clearly reflected in the sender domain. Verify through a known channel.", 20);
   }
   return result(indicators, indicators.some((item) => item.title === "Unusual sender identifier" || item.title === "Sender domain not verified") ? ["Verify an unfamiliar sender using a separate trusted channel before relying on the message.", "This local scan does not check domain registration, mail records, or sender reputation.", ...(indicators.some((item) => item.points > 0) ? ["Do not reply, open attachments, or use links until you are confident the message is legitimate."] : [])] : indicators.length ? ["Do not reply, open attachments, or use links in this message.", "Contact the organization using a phone number or website you already trust.", "Report the message to your mail provider or security team."] : ["No strong phishing patterns were found by these local rules.", "Confirm the sender and context independently before sharing sensitive information."]);
+}
+
+const disposableEmailDomains = new Set(["10minutemail.com", "discard.email", "guerrillamail.com", "mailinator.com", "sharklasers.com", "temp-mail.org", "tempmail.com", "yopmail.com"]);
+const commonMailProviders = ["gmail", "yahoo", "outlook", "hotmail", "icloud"];
+
+export function analyzeEmailAddress(raw: string): Analysis {
+  const address = raw.trim();
+  if (!address) return result([{ title: "Email address required", detail: "Enter one email address to analyze its format and local warning signs.", points: 0 }], ["Paste an address such as name@example.com."]);
+
+  const at = address.lastIndexOf("@");
+  const local = at > 0 ? address.slice(0, at) : "";
+  const domain = at > 0 ? address.slice(at + 1).toLowerCase() : "";
+  const labels = domain.split(".");
+  const validLocal = local.length <= 64 && /^(?!\.)(?!.*\.\.)[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/.test(local);
+  const validDomain = domain.length <= 253 && labels.length >= 2 && labels.every((label) => label.length >= 1 && label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label)) && /^[a-z]{2,63}$/i.test(labels.at(-1) ?? "");
+  const indicators: Indicator[] = [];
+  if (address.length > 254 || at < 0 || address.indexOf("@") !== at || !validLocal || !validDomain) {
+    add(indicators, "Invalid email address format", "This address does not match the supported email format rules. Correct spelling and punctuation before using it.", 35);
+    return result(indicators, ["Check for one @ sign, a valid domain with a suffix, and no spaces or consecutive dots.", "Format validation cannot prove that a mailbox exists or can receive email."]);
+  }
+
+  const host = domain.startsWith("www.") ? domain.slice(4) : domain;
+  const domainBase = labels.at(-2) ?? host;
+  const tld = labels.at(-1) ?? "";
+  if (disposableEmailDomains.has(host)) add(indicators, "Temporary email provider", `The domain ${host} is commonly used for temporary inboxes. This does not prove misuse, but it is unsuitable for verifying a lasting identity.`, 35);
+  const providerLookalike = commonMailProviders.find((provider) => domainBase !== provider && editDistance(domainBase, provider) === 1);
+  if (providerLookalike) add(indicators, "Possible email-provider typo", `The domain label “${domainBase}” closely resembles ${providerLookalike}. Check the spelling; lookalike domains can be used to imitate familiar mail services.`, 40);
+  if (/^[a-z]{5,}\d{3,}$/i.test(local)) add(indicators, "Unusual sender identifier", "The name before @ is followed by several digits. This pattern is sometimes used by generated or throwaway accounts, though legitimate addresses can look the same.", 30);
+  if (/[\u0080-\uFFFF]/.test(address) || tld.startsWith("xn--")) add(indicators, "Internationalized email address", "This address contains non-ASCII or punycode characters. Check the exact spelling carefully for lookalikes.", 20);
+  add(indicators, "Mailbox not verified", "This detector checks the address locally. It does not query DNS, check mail delivery, domain ownership, or reputation.", 0);
+  return result(indicators, indicators.some((item) => item.points > 0) ? ["Check the address character by character, especially the part after @.", "Do not treat a valid format as proof that the person or mailbox is genuine.", "Verify the sender through a separate trusted channel before sharing information."] : ["The address format looks valid, but that does not confirm the mailbox exists or belongs to the claimed person.", "Verify the sender independently before trusting a message."]);
 }
 
 const shorteners = new Set(["bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "buff.ly", "cutt.ly"]);
